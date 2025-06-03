@@ -1,9 +1,9 @@
-
 // src/ai/flows/summarize-interview.ts
 'use server';
 
 /**
- * @fileOverview A flow that summarizes an interview transcript into recruiter notes.
+ * @fileOverview A flow that summarizes an interview transcript into recruiter notes,
+ * potentially processing incrementally updated transcripts.
  *
  * - summarizeInterview - A function that takes an interview transcript and returns a structured summary.
  * - SummarizeInterviewInput - The input type for the summarizeInterview function.
@@ -16,7 +16,7 @@ import {z} from 'genkit';
 const SummarizeInterviewInputSchema = z.object({
   transcript: z
     .string()
-    .describe('The transcript of the interview to summarize.'),
+    .describe('The interview transcript to summarize. This may be a partial or complete transcript.'),
 });
 export type SummarizeInterviewInput = z.infer<typeof SummarizeInterviewInputSchema>;
 
@@ -33,14 +33,13 @@ const summarizeInterviewPrompt = ai.definePrompt({
   name: 'summarizeInterviewPrompt',
   input: {schema: SummarizeInterviewInputSchema},
   output: {schema: SummarizeInterviewOutputSchema},
-  prompt: `You are an AI assistant skilled in creating structured and detailed recruiter notes from interview transcripts.
-Your goal is to extract key information, meaningful statements, questions, and decisions as concise notes.
+  prompt: `You are an AI assistant skilled in creating structured and detailed recruiter notes from an interview transcript that is being updated, potentially in segments.
+Your goal is to extract key information, meaningful statements, questions, and decisions as concise notes based on the *entire transcript provided so far*.
 The notes MUST be in the same language as the input transcript. For example, if the transcript is in Korean, the notes must also be in Korean. If the transcript is in English, the notes must be in English.
 
-Interview Transcript:
-{{{transcript}}}
+Review the **entire current transcript** and generate a comprehensive set of recruiter notes. If the transcript is partial, provide notes based on the information available up to this point. As more of the transcript becomes available, your generated notes should reflect the updated and more complete understanding.
 
-Based on the transcript, provide detailed recruiter notes covering the following, as applicable. Structure the output as a list of notes:
+Focus on these aspects if present in the transcript:
 - Candidate's key skills and qualifications mentioned.
 - Important experiences and accomplishments highlighted by the candidate.
 - Significant questions asked by the candidate.
@@ -57,6 +56,9 @@ Present these notes in a clear, well-organized, bulleted, or numbered list forma
 Example of a note:
 - Candidate mentioned 5 years of experience with React and TypeScript.
 - Asked about the company's approach to work-life balance.
+
+Current Interview Transcript (this may be a partial segment or the complete transcript up to this point):
+{{{transcript}}}
 `,
 });
 
@@ -71,4 +73,3 @@ const summarizeInterviewFlow = ai.defineFlow(
     return output!;
   }
 );
-

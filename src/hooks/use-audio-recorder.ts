@@ -1,62 +1,73 @@
 // src/hooks/use-audio-recorder.ts
 "use client";
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+
+type UseAudioRecorderProps = {
+  onChunkAvailable: (audioDataUri: string) => void;
+  onRecordingStop?: () => void;
+  timeslice?: number; // milliseconds, e.g., 2000 for 2-second chunks
+};
 
 type AudioRecorderState = {
   isRecording: boolean;
-  audioDataUri: string | null;
   error: string | null;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
-  mediaRecorder: MediaRecorder | null;
 };
 
-export function useAudioRecorder(): AudioRecorderState {
+export function useAudioRecorder({ 
+  onChunkAvailable, 
+  onRecordingStop, 
+  timeslice = 3000 // Default to 3-second chunks
+}: UseAudioRecorderProps): AudioRecorderState {
   const [isRecording, setIsRecording] = useState(false);
-  const [audioDataUri, setAudioDataUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const startRecording = useCallback(async () => {
     setError(null);
-    setAudioDataUri(null);
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
         mediaRecorderRef.current = new MediaRecorder(stream);
-        audioChunksRef.current = [];
 
         mediaRecorderRef.current.ondataavailable = (event) => {
-          audioChunksRef.current.push(event.data);
+          if (event.data.size > 0) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              onChunkAvailable(reader.result as string);
+            };
+            reader.readAsDataURL(event.data);
+          }
         };
 
         mediaRecorderRef.current.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' }); // Common type, adjust if needed
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            setAudioDataUri(reader.result as string);
-          };
-          reader.readAsDataURL(audioBlob);
-          stream.getTracks().forEach(track => track.stop()); // Stop microphone access
+          setIsRecording(false);
+          streamRef.current?.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+          if (onRecordingStop) {
+            onRecordingStop();
+          }
         };
         
         mediaRecorderRef.current.onerror = (event) => {
-          // MediaRecorderErrorEvent is not fully typed in all environments, use 'any'
-          const err = event as any;
+          const err = event as any; // MediaRecorderErrorEvent might not be fully typed
           let message = 'Audio recording error';
-          if (err.error && err.error.message) {
-            message = err.error.message;
-          } else if (err.name) {
-            message = err.name;
+          if (err.error && err.error.name) {
+            message = err.error.name;
+          } else if (err.type) {
+            message = err.type;
           }
           setError(`Recording error: ${message}`);
           setIsRecording(false);
-          stream.getTracks().forEach(track => track.stop());
+          streamRef.current?.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
         };
 
-        mediaRecorderRef.current.start();
+        mediaRecorderRef.current.start(timeslice);
         setIsRecording(true);
       } catch (err) {
         if (err instanceof Error) {
@@ -70,21 +81,33 @@ export function useAudioRecorder(): AudioRecorderState {
       setError('Audio recording is not supported by your browser.');
       setIsRecording(false);
     }
-  }, []);
+  }, [onChunkAvailable, onRecordingStop, timeslice]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+      mediaRecorderRef.current.stop(); // This will trigger the 'onstop' event handler
+    } else if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'inactive') {
+      // If already stopped but resources might not be released
+      streamRef.current?.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      setIsRecording(false); // Ensure state consistency
     }
+  }, []);
+
+  // Cleanup effect to stop recording and release media resources on component unmount
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      streamRef.current?.getTracks().forEach(track => track.stop());
+    };
   }, []);
 
   return {
     isRecording,
-    audioDataUri,
     error,
     startRecording,
     stopRecording,
-    mediaRecorder: mediaRecorderRef.current,
   };
 }

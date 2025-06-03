@@ -1,90 +1,31 @@
 // src/components/summary-panel.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Download, Sparkles, Loader2, AlertCircle } from 'lucide-react';
-import { summarizeInterview, SummarizeInterviewInput } from '@/ai/flows/summarize-interview';
 import { useToast } from '@/hooks/use-toast';
 
 interface SummaryPanelProps {
-  transcript: string;
-  onSummarizationStatusChange: (status: 'summarizing' | 'error' | 'success', errorMsg?: string) => void;
-  isParentBusy?: boolean; // To disable export button if parent is recording or transcribing
+  summaryText: string;
+  isLoading: boolean;
+  isParentBusy?: boolean; // To disable export button if parent is recording or transcribing chunks
 }
 
-export function SummaryPanel({ transcript, onSummarizationStatusChange, isParentBusy = false }: SummaryPanelProps) {
-  const [summary, setSummary] = useState('');
-  const [internalStatus, setInternalStatus] = useState<'idle' | 'summarizing' | 'error' | 'success'>('idle');
-  const [summaryError, setSummaryError] = useState<string | null>(null);
+export function SummaryPanel({ summaryText, isLoading, isParentBusy = false }: SummaryPanelProps) {
   const { toast } = useToast();
 
-  const handleGenerateSummary = useCallback(async (currentTranscript: string) => {
-    if (!currentTranscript.trim()) {
-      // This case should ideally be handled by the parent not calling if transcript is empty
-      // but as a safeguard:
-      setInternalStatus('idle');
-      onSummarizationStatusChange('idle' as any); // Or handle idle state if defined in parent
-      return;
-    }
-
-    setInternalStatus('summarizing');
-    onSummarizationStatusChange('summarizing');
-    setSummaryError(null);
-    setSummary(''); // Clear previous summary
-
-    try {
-      const input: SummarizeInterviewInput = { transcript: currentTranscript };
-      const result = await summarizeInterview(input);
-      if (result.summary) {
-        setSummary(result.summary);
-        setInternalStatus('success');
-        onSummarizationStatusChange('success');
-        // Toast is now handled by parent page for overall process completion
-      } else {
-        throw new Error("Summarization result was empty.");
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during summarization.";
-      setSummaryError(errorMessage);
-      setInternalStatus('error');
-      onSummarizationStatusChange('error', errorMessage);
-      toast({ // Still show specific error toast from here
-        title: "Summarization Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    }
-  }, [onSummarizationStatusChange, toast]);
-
-  useEffect(() => {
-    if (transcript.trim()) {
-      // Only trigger if transcript is non-empty and different from what might have caused previous summary
-      // The parent component `page.tsx` now controls when to start summarizing by changing `appStatus`
-      // which in turn calls `onSummarizationStatusChange('summarizing')`
-      // This useEffect will call handleGenerateSummary when `transcript` effectively changes.
-      handleGenerateSummary(transcript);
-    } else {
-      // If transcript becomes empty (e.g. new recording started), reset summary panel
-      setSummary('');
-      setInternalStatus('idle');
-      setSummaryError(null);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transcript]); // Reacts to transcript changes
-
   const handleExportSummary = () => {
-    if (!summary.trim()) {
+    if (!summaryText.trim()) {
       toast({
         title: "Cannot Export Summary",
-        description: "Please generate a summary first.",
+        description: "No summary available to export.",
         variant: "destructive",
       });
       return;
     }
-    const blob = new Blob([summary], { type: 'text/plain;charset=utf-8' });
+    const blob = new Blob([summaryText], { type: 'text/plain;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = 'recruiter_notes.txt';
@@ -99,12 +40,11 @@ export function SummaryPanel({ transcript, onSummarizationStatusChange, isParent
   };
   
   const getStatusMessageForPanel = () => {
-    if (internalStatus === 'idle' && !transcript.trim()) return 'Waiting for transcription...';
-    if (internalStatus === 'idle' && transcript.trim()) return 'Ready to summarize. (Auto-starts)';
-    if (internalStatus === 'summarizing') return 'Generating summary...';
-    if (internalStatus === 'error') return `Error: ${summaryError || 'Unknown error'}`;
-    if (internalStatus === 'success') return 'Summary generated successfully.';
-    return 'Standby';
+    if (isLoading) return 'Updating recruiter notes...';
+    if (!summaryText.trim() && !isParentBusy && !isLoading) return 'Recruiter notes will appear here.';
+    if (summaryText.trim() && !isLoading) return 'Notes updated.';
+    if (isParentBusy && !isLoading) return 'Waiting for transcription to provide more content for notes...';
+    return 'Standby for notes.';
   };
 
   return (
@@ -117,21 +57,21 @@ export function SummaryPanel({ transcript, onSummarizationStatusChange, isParent
       </CardHeader>
       <CardContent className="space-y-6 p-6">
          <div className="flex items-center gap-2 text-sm text-muted-foreground p-2 bg-secondary rounded-md w-full justify-center">
-            {internalStatus === 'summarizing' ? <Loader2 className="h-5 w-5 animate-spin text-accent" /> : null}
-            {internalStatus === 'error' ? <AlertCircle className="h-5 w-5 text-destructive" /> : null}
+            {isLoading ? <Loader2 className="h-5 w-5 animate-spin text-accent" /> : null}
+            {/* Add AlertCircle for error if specific error state is passed */}
             <span>{getStatusMessageForPanel()}</span>
           </div>
 
         <Textarea
-          placeholder="Structured recruiter notes will appear here after transcription and summarization..."
-          value={summary}
+          placeholder="Structured recruiter notes will appear here in real-time..."
+          value={summaryText}
           readOnly
           className="min-h-[200px] sm:min-h-[300px] text-base bg-background border-2 border-input focus:border-primary rounded-lg p-4 shadow-inner"
           aria-label="Summary output"
         />
         <Button
           onClick={handleExportSummary}
-          disabled={!summary.trim() || internalStatus === 'summarizing' || isParentBusy}
+          disabled={!summaryText.trim() || isLoading || isParentBusy}
           variant="outline"
           className="w-full sm:w-auto min-w-[180px] transition-all duration-150 ease-in-out transform hover:scale-105"
           aria-label="Export summary as TXT file"
