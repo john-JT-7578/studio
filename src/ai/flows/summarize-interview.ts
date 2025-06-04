@@ -1,3 +1,4 @@
+
 // src/ai/flows/summarize-interview.ts
 'use server';
 
@@ -21,7 +22,7 @@ const SummarizeInterviewInputSchema = z.object({
 export type SummarizeInterviewInput = z.infer<typeof SummarizeInterviewInputSchema>;
 
 const SummarizeInterviewOutputSchema = z.object({
-  summary: z.string().describe('Structured recruiter notes based on the interview transcript, in the same language as the transcript and following specific formatting rules.'),
+  summary: z.string().describe('Structured recruiter notes based on the interview transcript, in English, and following specific formatting rules. If the transcript is too short or uninformative, this will be a specific placeholder message.'),
 });
 export type SummarizeInterviewOutput = z.infer<typeof SummarizeInterviewOutputSchema>;
 
@@ -39,6 +40,11 @@ Your job is to help recruiters by listening to live interview transcripts and su
 
 You will receive transcripts in chunks as the interview progresses.
 
+IMPORTANT PRELIMINARY RULE:
+Before attempting to apply the detailed formatting rules below, first assess the provided transcript.
+- If the transcript is very short (e.g., only a few words, or just filler sounds like "um", "uh"), or if it contains no information relevant to any of the defined recruiter note sections, then you MUST output ONLY the following exact text: "Waiting for more meaningful content to summarize."
+- If the transcript is substantial and contains information relevant to the recruiter note sections, then proceed with the detailed formatting rules below.
+
 For each update, your task is to maintain and update a clean summary using the following rules:
 
 1. Group information into appropriate sections with clear section headers:
@@ -54,11 +60,11 @@ For each update, your task is to maintain and update a clean summary using the f
 
 3. Only include information that was explicitly stated in the transcript. Never assume or invent details.
 
-4. Rephrase spoken language into clean, professional English. The notes MUST be in the same language as the input transcript. If the transcript is in Korean, the notes must also be in Korean. If the transcript is in English, the notes must be in English.
+4. Rephrase spoken language into clean, professional English. The notes MUST be in English.
 
 5. Do not output JSON or code. Only write a clean summary formatted like a recruiter’s notes.
 
-6. If a section has no relevant content, omit it.
+6. If a section has no relevant content, you MUST omit the section entirely from your output. Do not include empty sections or headers with no bullet points.
 
 7. Treat future transcript chunks as cumulative updates — expand or revise the summary as needed based on the ENTIRE transcript provided so far.
 
@@ -74,13 +80,13 @@ Currently leading Influencer Marketing campaigns at Razor focused on storytellin
 Familiar with fandom culture but no direct experience. Reports to VP of Marketing at Razor; previously led a small team at CJ America.
 Comfortable working long hours and building from scratch.
 Native Korean and English speaker. US Citizen. Past experience at CJ America and Samsung C&T.
-Interested in returning to the entertainment industry, especially in K-pop and brand engagement. 
+Interested in returning to the entertainment industry, especially in K-pop and brand engagement.
 Currently at Razor USA as Marketing Manager. Open to new opportunities aligned with career growth. Not actively interviewing.
 Prefers 3-week notice period. Lives in Los Angeles (Hancock Park/Koreatown), open to commuting to Santa Monica.
 Looking for base salary $150K+ with bonus.
 """
 
-✅ Example Output (FOR ILLUSTRATION ONLY - GPT should produce similar format for the ACTUAL transcript):
+✅ Example Output (FOR ILLUSTRATION ONLY - AI should produce similar format for the ACTUAL transcript):
 ---
 
 **Marketing Experience:**
@@ -119,7 +125,7 @@ Looking for base salary $150K+ with bonus.
 END OF EXAMPLE SECTION.
 ---
 
----
+IMPORTANT: If the ACTUAL INTERVIEW TRANSCRIPT below is very short or contains no actionable information as per the PRELIMINARY RULE stated above, you MUST follow that rule. Otherwise, proceed to summarize according to the detailed rules.
 ACTUAL INTERVIEW TRANSCRIPT TO SUMMARIZE STARTS BELOW (this may be a partial segment or the complete transcript up to this point):
 ---
 {{{transcript}}}
@@ -133,6 +139,11 @@ const summarizeInterviewFlow = ai.defineFlow(
     outputSchema: SummarizeInterviewOutputSchema,
   },
   async input => {
+    // Ensure transcript is not just whitespace before sending to AI,
+    // though the prompt now also handles very short/empty inputs.
+    if (!input.transcript || !input.transcript.trim()) {
+      return { summary: "Waiting for more meaningful content to summarize." };
+    }
     const {output} = await summarizeInterviewPrompt(input);
     return output!;
   }
