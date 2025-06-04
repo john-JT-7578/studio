@@ -16,11 +16,13 @@ import { useToast } from '@/hooks/use-toast';
 type AppProcessingStatus =
   | 'idle'
   | 'capturingAudio'
-  | 'processingAudioChunk'
+  | 'processingAudioChunk' // Transcribing (intermediate or final chunks after stop)
   | 'summarizingNotes'
   | 'error';
 
 const MIN_TRANSCRIPT_LENGTH_FOR_SUMMARY = 30; // Characters
+const AUDIO_TIMESLICE_MS = 10000; // 10 seconds for audio chunks
+const SUMMARIZE_DEBOUNCE_MS = 7000; // 7 seconds debounce for summarization
 
 export default function RecruitAssistPage() {
   const [currentTranscript, setCurrentTranscript] = useState('');
@@ -32,19 +34,20 @@ export default function RecruitAssistPage() {
 
   const audioChunkQueueRef = useRef<string[]>([]);
   const isProcessingAudioChunkRef = useRef(false);
-  const transcriptRef = useRef(''); 
+  const transcriptRef = useRef('');
   const summarizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const processAudioChunkQueueRef = useRef<() => void>(() => {});
 
+
   const {
-    isRecording: isCapturing,
+    isRecording, // Renamed from isCapturing for clarity from the hook
     error: recorderError,
     startRecording: startAudioCapture,
     stopRecording: stopAudioCapture
   } = useAudioRecorder({
     onChunkAvailable: (audioDataUri) => {
-      if (appStatus === 'error') return; 
+      if (appStatus === 'error') return;
       audioChunkQueueRef.current.push(audioDataUri);
       processAudioChunkQueueRef.current();
     },
@@ -55,42 +58,41 @@ export default function RecruitAssistPage() {
       const checkAndFinalize = () => {
         if (audioChunkQueueRef.current.length === 0 && !isProcessingAudioChunkRef.current) {
           if (transcriptRef.current.trim().length >= MIN_TRANSCRIPT_LENGTH_FOR_SUMMARY && appStatus !== 'error') {
-             handleSummarizeNotes(transcriptRef.current, true); 
+             handleSummarizeNotes(transcriptRef.current, true);
           } else if (appStatus !== 'error') {
             if (!transcriptRef.current.trim()) {
                 setCurrentNotes("Recruiter notes will appear here once enough content is transcribed.");
             }
-            setAppStatus('idle'); 
+            setAppStatus('idle');
           }
         } else if (appStatus !== 'error') {
-          setAppStatus('processingAudioChunk');
-          setTimeout(checkAndFinalize, 500); 
+          setAppStatus('processingAudioChunk'); // Processing remaining chunks
+          setTimeout(checkAndFinalize, 500);
         }
       };
       checkAndFinalize();
     },
-    timeslice: 10000, 
+    timeslice: AUDIO_TIMESLICE_MS,
   });
 
   useEffect(() => {
     transcriptRef.current = currentTranscript;
   }, [currentTranscript]);
 
+
   const handleSummarizeNotes = useCallback(async (transcriptToSummarize: string, isFinal: boolean = false) => {
     if (transcriptToSummarize.trim().length < MIN_TRANSCRIPT_LENGTH_FOR_SUMMARY) {
-      if (isFinal && !isCapturing && appStatus !== 'error') {
+      if (isFinal && !isRecording && appStatus !== 'error') {
         setCurrentNotes("Not enough content to summarize. Try recording a longer interview.");
-        setAppStatus('idle');
-      } else if (!isFinal && appStatus !== 'summarizingNotes') {
-        // For intermediate summaries, if content is too short, show placeholder
+         if (appStatus !== 'error') setAppStatus('idle');
+      } else if (!isFinal && appStatus !== 'summarizingNotes' && appStatus !== 'error') {
         setCurrentNotes("Waiting for more meaningful content to summarize.");
       }
       return;
     }
 
     if (appStatus === 'summarizingNotes' && !isFinal) return;
-    if (appStatus === 'error' && !isFinal) return;
-
+    if (appStatus === 'error' && !isFinal) return; // Don't attempt intermediate summary if already in error state
 
     setAppStatus('summarizingNotes');
     try {
@@ -98,68 +100,71 @@ export default function RecruitAssistPage() {
       const result = await summarizeInterview(input);
       setCurrentNotes(result.summary);
 
-      if (appStatus !== 'error') { 
+      if (appStatus !== 'error') { // Ensure not to override if an error occurred during this operation itself
         if (isFinal) {
           toast({ title: "Processing Complete", description: "Transcription and notes generation finished."});
           setAppStatus('idle');
-        } else if (isCapturing) {
-          setAppStatus('capturingAudio'); 
+        } else if (isRecording) { // Check actual recording status
+          setAppStatus('capturingAudio');
         } else {
-          setAppStatus('idle');
+          // If not final and not recording, it means recording stopped and this is an intermediate summary triggered by debounce
+          // before onRecordingStop's final summarization logic. Or, it's processing remaining chunks.
+           setAppStatus('processingAudioChunk'); // Or 'idle' if no more chunks and this was the last debounced summary
         }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "An error occurred during summarization.";
       console.error("Summarization error:", err);
       setErrorMessage(msg);
-      setAppStatus('error'); 
+      setCurrentNotes(`Error updating notes. Details: ${msg.substring(0, 150)}...`);
+      setAppStatus('error');
       toast({ title: "Summarization Error", description: msg, variant: "destructive" });
     }
-  }, [toast, appStatus, isCapturing]); 
+  }, [isRecording, appStatus, toast]); // Added appStatus and isRecording
 
   useEffect(() => {
-    if (!isCapturing || !currentTranscript.trim() || appStatus === 'error' || appStatus === 'summarizingNotes') {
+    if (!isRecording || !currentTranscript.trim() || appStatus === 'error' || appStatus === 'summarizingNotes') {
       if (summarizeTimeoutRef.current) {
         clearTimeout(summarizeTimeoutRef.current);
       }
       return;
     }
-    
-    if (currentTranscript.trim().length < MIN_TRANSCRIPT_LENGTH_FOR_SUMMARY) {
+
+    if (transcriptRef.current.trim().length < MIN_TRANSCRIPT_LENGTH_FOR_SUMMARY) {
       if (summarizeTimeoutRef.current) {
         clearTimeout(summarizeTimeoutRef.current);
       }
-      // Optionally update notes to indicate waiting for more content if not already summarizing
-      if (appStatus !== 'summarizingNotes') {
+      if (appStatus !== 'summarizingNotes' && appStatus !== 'error') {
         setCurrentNotes("Waiting for more meaningful content to summarize.");
       }
       return;
     }
-
 
     if (summarizeTimeoutRef.current) {
       clearTimeout(summarizeTimeoutRef.current);
     }
 
     summarizeTimeoutRef.current = setTimeout(() => {
-      if (isCapturing && currentTranscript.trim().length >= MIN_TRANSCRIPT_LENGTH_FOR_SUMMARY && appStatus !== 'error' && appStatus !== 'summarizingNotes') {
-        handleSummarizeNotes(currentTranscript, false); 
+      if (isRecording && transcriptRef.current.trim().length >= MIN_TRANSCRIPT_LENGTH_FOR_SUMMARY && appStatus !== 'error' && appStatus !== 'summarizingNotes') {
+        handleSummarizeNotes(transcriptRef.current, false);
       }
-    }, 7000); 
+    }, SUMMARIZE_DEBOUNCE_MS);
 
     return () => {
       if (summarizeTimeoutRef.current) {
         clearTimeout(summarizeTimeoutRef.current);
       }
     };
-  }, [currentTranscript, isCapturing, handleSummarizeNotes, appStatus]); 
+  }, [currentTranscript, isRecording, handleSummarizeNotes, appStatus]);
+
 
   const handleChunkTranscription = useCallback(async (audioDataUri: string) => {
     isProcessingAudioChunkRef.current = true;
-    if (isCapturing) {
-      setAppStatus('capturingAudio'); 
+    // Set status based on whether recording is active or processing buffered chunks
+    if (isRecording) {
+      if (appStatus !== 'error' && appStatus !== 'summarizingNotes') setAppStatus('capturingAudio');
     } else {
-      setAppStatus('processingAudioChunk'); 
+      if (appStatus !== 'error' && appStatus !== 'summarizingNotes') setAppStatus('processingAudioChunk');
     }
 
     try {
@@ -174,21 +179,25 @@ export default function RecruitAssistPage() {
       const msg = err instanceof Error ? err.message : "An error occurred while processing audio.";
       console.error("Chunk transcription error:", err);
       setErrorMessage(msg);
-      setAppStatus('error'); 
+      setAppStatus('error');
       toast({ title: "Transcription Error", description: msg, variant: "destructive" });
     } finally {
       isProcessingAudioChunkRef.current = false;
-      processAudioChunkQueueRef.current();
-      
-      if (!isCapturing && audioChunkQueueRef.current.length === 0) {
-        if (appStatus !== 'error' && !transcriptRef.current.trim()) {
+      processAudioChunkQueueRef.current(); // Attempt to process next chunk
+
+      if (!isRecording && audioChunkQueueRef.current.length === 0) { // All chunks processed after stopping
+        if (appStatus !== 'error' && !transcriptRef.current.trim()) { // If nothing was transcribed
+           setAppStatus('idle');
+        } else if (appStatus !== 'error' && appStatus !== 'summarizingNotes' && transcriptRef.current.trim().length < MIN_TRANSCRIPT_LENGTH_FOR_SUMMARY) {
+           // If transcribed content is too short for final summary and not already summarizing/error
            setAppStatus('idle');
         }
-      } else if (isCapturing && appStatus !== 'error' && appStatus !== 'summarizingNotes') {
+        // Final summarization is handled by onRecordingStop
+      } else if (isRecording && appStatus !== 'error' && appStatus !== 'summarizingNotes') {
         setAppStatus('capturingAudio');
       }
     }
-  }, [isCapturing, appStatus, toast, processAudioChunkQueueRef]); 
+  }, [isRecording, appStatus, toast, processAudioChunkQueueRef]);
 
 
   const doProcessAudioChunkQueue = useCallback(() => {
@@ -198,11 +207,12 @@ export default function RecruitAssistPage() {
         handleChunkTranscription(chunkToProcess);
       }
     }
-  }, [appStatus, handleChunkTranscription]); 
+  }, [appStatus, handleChunkTranscription]);
 
   useEffect(() => {
     processAudioChunkQueueRef.current = doProcessAudioChunkQueue;
   }, [doProcessAudioChunkQueue]);
+
 
   useEffect(() => {
     if (recorderError) {
@@ -213,17 +223,19 @@ export default function RecruitAssistPage() {
   }, [recorderError, toast]);
 
   const handleRecordToggle = async () => {
-    if (isCapturing) {
+    if (isRecording) {
       stopAudioCapture();
+      // onRecordingStop callback will handle final processing and status updates
     } else {
       setCurrentTranscript('');
       setCurrentNotes("Recruiter notes will appear here once enough content is transcribed.");
       transcriptRef.current = '';
       audioChunkQueueRef.current = [];
       setErrorMessage(null);
-      setAppStatus('capturingAudio'); 
+      setAppStatus('capturingAudio'); // Initial status when starting
       try {
         await startAudioCapture();
+        // isRecording state will be true now
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to start recording.";
         setErrorMessage(msg);
@@ -239,15 +251,16 @@ export default function RecruitAssistPage() {
       case 'idle': return 'Ready to record.';
       case 'capturingAudio':
         return isProcessingAudioChunkRef.current ? 'Transcribing in real-time...' : 'Listening...';
-      case 'processingAudioChunk': return 'Processing final audio...';
+      case 'processingAudioChunk': return 'Processing audio...'; // Simplified
       case 'summarizingNotes': return 'Updating notes...';
-      case 'error': return `An error occurred. ${errorMessage || 'Please try again.'}`; 
-      default: return 'Initializing...'; 
+      case 'error': return `An error occurred. ${errorMessage || 'Please try again.'}`;
+      default: return 'Initializing...';
     }
   };
-  
-  const isProcessingAnythingNonRecording = 
-    (appStatus === 'processingAudioChunk' || appStatus === 'summarizingNotes') && !isCapturing;
+
+  const isProcessingAnythingNonRecording =
+    (appStatus === 'processingAudioChunk' || appStatus === 'summarizingNotes') && !isRecording;
+
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-start p-4 sm:p-8 bg-background">
@@ -267,16 +280,16 @@ export default function RecruitAssistPage() {
         <div className="flex flex-col sm:flex-row items-center gap-4">
           <Button
             onClick={handleRecordToggle}
-            disabled={isProcessingAnythingNonRecording} 
+            disabled={isProcessingAnythingNonRecording}
             className="w-full sm:w-auto min-w-[200px] transition-all duration-150 ease-in-out transform hover:scale-105 text-lg py-3 px-6"
-            variant={isCapturing ? "destructive" : "default"}
+            variant={isRecording ? "destructive" : "default"}
             size="lg"
           >
-            {isCapturing ? <Square className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
-            {isCapturing ? 'Stop Recording' : 'Start Recording'}
+            {isRecording ? <Square className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
+            {isRecording ? 'Stop Recording' : 'Start Recording'}
           </Button>
           <div className={`flex items-center gap-2 text-sm p-3 rounded-md w-full sm:flex-grow justify-center sm:justify-start
-            ${appStatus === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-secondary text-muted-foreground'}`}>
+            ${appStatus === 'error' ? 'bg-destructive/10 text-destructive-foreground' : 'bg-secondary text-secondary-foreground'}`}>
             {appStatus === 'capturingAudio' && !isProcessingAudioChunkRef.current && <Mic className="h-5 w-5 text-primary animate-pulse" />}
             {(appStatus === 'processingAudioChunk' || (appStatus === 'capturingAudio' && isProcessingAudioChunkRef.current)) && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
             {appStatus === 'summarizingNotes' && <Loader2 className="h-5 w-5 animate-spin text-accent" />}
@@ -299,7 +312,7 @@ export default function RecruitAssistPage() {
               placeholder="Live transcription of the interview will appear here..."
               value={currentTranscript}
               readOnly
-              className="min-h-[300px] sm:min-h-[400px] text-base bg-background border-2 border-input focus:border-primary rounded-lg p-4 shadow-inner"
+              className="min-h-[300px] sm:min-h-[400px] text-base bg-secondary border-2 border-input focus:border-primary rounded-lg p-4 shadow-inner"
               aria-label="Transcription output"
             />
           </CardContent>
@@ -308,7 +321,7 @@ export default function RecruitAssistPage() {
         <SummaryPanel
           summaryText={currentNotes}
           isLoading={appStatus === 'summarizingNotes'}
-          isParentBusy={isCapturing || appStatus === 'processingAudioChunk'} 
+          isParentBusy={isRecording || appStatus === 'processingAudioChunk'}
         />
       </main>
 
@@ -317,9 +330,10 @@ export default function RecruitAssistPage() {
           Privacy: Audio is processed for transcription. Transcriptions are used for summarization. This application does not permanently store audio files or transcriptions.
         </p>
         <p className="text-xs text-muted-foreground mt-2">
-            Note: AI transcription and summarization may not be 100% accurate.
+            Note: AI transcription and summarization may not be 100% accurate. Always verify critical information.
         </p>
       </footer>
     </div>
   );
 }
+
