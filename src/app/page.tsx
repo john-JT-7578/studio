@@ -54,6 +54,7 @@ export default function RecruitAssistPage() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Transcription error for chunk.";
+      console.error("Chunk transcription error:", err);
       setErrorMessage(msg);
       setAppStatus('error');
       toast({ title: "Transcription Error", description: msg, variant: "destructive" });
@@ -61,7 +62,7 @@ export default function RecruitAssistPage() {
       isProcessingAudioChunkRef.current = false;
       processAudioChunkQueue();
       if (!isCapturing && audioChunkQueueRef.current.length === 0) {
-        // Final summary is now handled by onRecordingStop's checkAndFinalize
+        // Final summary is handled by onRecordingStop's checkAndFinalize
         if (appStatus !== 'error' && !transcriptRef.current.trim()) {
            setAppStatus('idle');
         }
@@ -105,6 +106,7 @@ export default function RecruitAssistPage() {
         }
       };
       if (appStatus !== 'error') {
+        setAppStatus('processingAudioChunk'); // Indicate final chunks might be processing
         checkAndFinalize();
       } else {
         if (audioChunkQueueRef.current.length === 0 && !isProcessingAudioChunkRef.current) {
@@ -112,7 +114,7 @@ export default function RecruitAssistPage() {
         }
       }
     },
-    timeslice: 5000, // Process audio in 5-second chunks
+    timeslice: 15000, // Process audio in 15-second chunks
   });
 
   useEffect(() => {
@@ -137,11 +139,11 @@ export default function RecruitAssistPage() {
         toast({ title: "Process Complete", description: "Transcription and notes generated."});
         setAppStatus('idle');
       } else if (appStatus !== 'error') {
-         // If not final (which shouldn't happen with current logic) or still capturing
          setAppStatus(isCapturing ? 'capturingAudio' : 'idle');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Summarization error.";
+      console.error("Summarization error:", err);
       setErrorMessage(msg);
       setAppStatus('error');
       toast({ title: "Summarization Error", description: msg, variant: "destructive" });
@@ -152,14 +154,14 @@ export default function RecruitAssistPage() {
   const handleRecordToggle = async () => {
     if (isCapturing) {
       stopAudioCapture();
-      // Summarization will be triggered by onRecordingStop after chunks are processed
+      // Summarization will be triggered by onRecordingStop after all chunks are processed
     } else {
       setCurrentTranscript('');
       setCurrentNotes('');
       transcriptRef.current = '';
       audioChunkQueueRef.current = [];
       setErrorMessage(null);
-      setAppStatus('capturingAudio');
+      setAppStatus('capturingAudio'); // Initial status
       try {
         await startAudioCapture();
       } catch (err) {
@@ -204,7 +206,7 @@ export default function RecruitAssistPage() {
         <div className="flex flex-col sm:flex-row items-center gap-4">
           <Button
             onClick={handleRecordToggle}
-            disabled={isProcessingAnythingNonRecording && appStatus !== 'summarizingNotes'} // Allow stopping if only summarizing
+            disabled={isProcessingAnythingNonRecording && appStatus !== 'summarizingNotes'}
             className="w-full sm:w-auto min-w-[200px] transition-all duration-150 ease-in-out transform hover:scale-105 text-lg py-3 px-6"
             variant={isCapturing ? "destructive" : "default"}
             size="lg"
