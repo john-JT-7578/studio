@@ -1,3 +1,4 @@
+
 // src/app/page.tsx
 "use client";
 
@@ -38,27 +39,40 @@ export default function RecruitAssistPage() {
 
   const handleChunkTranscription = async (audioDataUri: string) => {
     isProcessingAudioChunkRef.current = true;
-    setAppStatus('processingAudioChunk');
+    // Keep appStatus as 'capturingAudio' if actively recording, else 'processingAudioChunk'
+    // This helps UI reflect ongoing recording better while chunk processes.
+    if (isCapturing) {
+      setAppStatus('capturingAudio'); 
+    } else {
+      setAppStatus('processingAudioChunk');
+    }
+
     try {
       const input: TranscribeInterviewInput = { audioDataUri };
       const result = await transcribeInterview(input);
       if (result.transcription) {
         setCurrentTranscript(prev => prev + (prev ? " " : "") + result.transcription);
       } else {
-        // Potentially log or handle empty transcription for a chunk
         console.warn("Transcription for chunk was empty.");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Transcription error for chunk.";
       setErrorMessage(msg);
-      setAppStatus('error'); // Consider if this should stop the whole process or just note an error for a chunk
+      setAppStatus('error'); 
       toast({ title: "Transcription Error", description: msg, variant: "destructive" });
     } finally {
       isProcessingAudioChunkRef.current = false;
-      // If still recording, revert status to capturingAudio, else idle if no more chunks.
-      // The recorder's isRecording state will be the source of truth for 'capturingAudio'
-      // This will be handled by the recorder's state via the main isCapturing variable.
       processAudioChunkQueue(); 
+      // If not recording anymore and queue is empty, set to idle or trigger final summary
+      if (!isCapturing && audioChunkQueueRef.current.length === 0) {
+        if (transcriptRef.current.trim() && appStatus !== 'error') { // Check appStatus to avoid summarizing on error
+           // Final summary handled by onRecordingStop's checkAndFinalize
+        } else if (appStatus !== 'error') {
+           setAppStatus('idle');
+        }
+      } else if (isCapturing && appStatus !== 'error') {
+        setAppStatus('capturingAudio'); // Ensure it's back to capturing audio if still recording
+      }
     }
   };
   
@@ -69,40 +83,43 @@ export default function RecruitAssistPage() {
         handleChunkTranscription(chunkToProcess);
       }
     }
-    // If queue is empty and not recording, app might be idle or finishing summarization
-    // This part is tricky, appStatus should reflect recorder.isRecording primarily
   }, []);
 
   const { 
-    isRecording: isCapturing, // isRecording from hook indicates if mic is active
+    isRecording: isCapturing, 
     error: recorderError, 
     startRecording: startAudioCapture, 
     stopRecording: stopAudioCapture 
   } = useAudioRecorder({
     onChunkAvailable: (audioDataUri) => {
       audioChunkQueueRef.current.push(audioDataUri);
-      processAudioChunkQueue();
+      if (appStatus !== 'error') { // Only process if not in error state
+        processAudioChunkQueue();
+      }
     },
     onRecordingStop: () => {
-      // Ensure any remaining chunks are processed
-      processAudioChunkQueue(); 
-      // Final summarization after recording stops and all chunks are processed.
-      // Check if queue is empty and not processing.
       const checkAndFinalize = () => {
         if (audioChunkQueueRef.current.length === 0 && !isProcessingAudioChunkRef.current) {
           if (summaryTimeoutRef.current) clearTimeout(summaryTimeoutRef.current);
-          if (transcriptRef.current.trim()) {
-            handleSummarizeNotes(transcriptRef.current, true); // true for final summarization
-          } else {
+          if (transcriptRef.current.trim() && appStatus !== 'error') {
+            handleSummarizeNotes(transcriptRef.current, true); 
+          } else if (appStatus !== 'error') {
             setAppStatus('idle');
           }
-        } else {
-          setTimeout(checkAndFinalize, 500); // Check again shortly
+        } else if (appStatus !== 'error') {
+          setTimeout(checkAndFinalize, 500); 
         }
       };
-      checkAndFinalize();
+      if (appStatus !== 'error') {
+        checkAndFinalize();
+      } else {
+        // If already in error, just ensure UI reflects idle or error state
+        if (audioChunkQueueRef.current.length === 0 && !isProcessingAudioChunkRef.current) {
+          // No more processing to do. Error state should persist.
+        }
+      }
     },
-    timeslice: 2500, // Process audio in 2.5-second chunks
+    timeslice: 5000, // Process audio in 5-second chunks
   });
 
   useEffect(() => {
@@ -114,8 +131,8 @@ export default function RecruitAssistPage() {
   }, [recorderError, toast]);
 
   const handleSummarizeNotes = useCallback(async (transcriptToSummarize: string, isFinal: boolean = false) => {
-    if (!transcriptToSummarize.trim()) {
-      if (isFinal && !isCapturing) setAppStatus('idle');
+    if (!transcriptToSummarize.trim() || appStatus === 'error') { // Do not summarize if error or empty
+      if (isFinal && !isCapturing && appStatus !== 'error') setAppStatus('idle');
       return;
     }
     setAppStatus('summarizingNotes');
@@ -123,13 +140,13 @@ export default function RecruitAssistPage() {
       const input: SummarizeInterviewInput = { transcript: transcriptToSummarize };
       const result = await summarizeInterview(input);
       setCurrentNotes(result.summary);
-      if (isFinal) {
+      if (isFinal && appStatus !== 'error') {
         toast({ title: "Process Complete", description: "Transcription and notes generated."});
-        setAppStatus('idle'); // Or 'success' if you have one
-      } else if (isCapturing) {
-         setAppStatus('capturingAudio'); // Revert to capturing if still ongoing
-      } else {
-         setAppStatus('idle'); // If not capturing and not final, should be idle
+        setAppStatus('idle'); 
+      } else if (isCapturing && appStatus !== 'error') {
+         setAppStatus('capturingAudio'); 
+      } else if (appStatus !== 'error') {
+         setAppStatus('idle'); 
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Summarization error.";
@@ -137,43 +154,38 @@ export default function RecruitAssistPage() {
       setAppStatus('error');
       toast({ title: "Summarization Error", description: msg, variant: "destructive" });
     }
-  }, [toast, isCapturing]);
+  }, [toast, isCapturing, appStatus]); // Added appStatus to dependencies
 
   useEffect(() => {
-    if (currentTranscript.trim()) {
+    if (currentTranscript.trim() && appStatus !== 'error' && (isCapturing || audioChunkQueueRef.current.length > 0 || isProcessingAudioChunkRef.current)) {
       if (summaryTimeoutRef.current) {
         clearTimeout(summaryTimeoutRef.current);
       }
-      // Only summarize if capturing or if it's the final chunk implicitly
-      if (isCapturing || audioChunkQueueRef.current.length > 0 || isProcessingAudioChunkRef.current) {
-        summaryTimeoutRef.current = setTimeout(() => {
-            // Check if still capturing, otherwise it might be the final summary handled by onRecordingStop
-            if(isCapturing) {
-                 handleSummarizeNotes(transcriptRef.current);
-            }
-        }, 3000); // Debounce summarization: 3s after last transcript update during recording
-      }
+      summaryTimeoutRef.current = setTimeout(() => {
+          if(isCapturing && appStatus !== 'error') { // Only summarize if still capturing and no error
+               handleSummarizeNotes(transcriptRef.current);
+          }
+      }, 7000); // Debounce summarization: 7s after last transcript update during recording
     }
-    // Cleanup timeout on unmount or when isCapturing becomes false
+    
     return () => {
       if (summaryTimeoutRef.current) {
         clearTimeout(summaryTimeoutRef.current);
       }
     };
-  }, [currentTranscript, handleSummarizeNotes, isCapturing]);
+  }, [currentTranscript, handleSummarizeNotes, isCapturing, appStatus]); // Added appStatus
 
 
   const handleRecordToggle = async () => {
-    setErrorMessage(null);
     if (isCapturing) {
       stopAudioCapture();
-      // Status will be managed by onRecordingStop and subsequent processing
     } else {
       setCurrentTranscript('');
       setCurrentNotes('');
       transcriptRef.current = '';
       audioChunkQueueRef.current = [];
       if (summaryTimeoutRef.current) clearTimeout(summaryTimeoutRef.current);
+      setErrorMessage(null); // Clear previous errors
       setAppStatus('capturingAudio');
       try {
         await startAudioCapture();
@@ -190,15 +202,17 @@ export default function RecruitAssistPage() {
     if (appStatus === 'error' && errorMessage) return `Error: ${errorMessage}`;
     switch (appStatus) {
       case 'idle': return 'Ready to record interview.';
-      case 'capturingAudio': return 'Recording audio... Real-time processing active.';
-      case 'processingAudioChunk': return 'Transcribing audio chunk...';
+      case 'capturingAudio': 
+        return isProcessingAudioChunkRef.current ? 'Recording & Transcribing chunk...' : 'Recording audio... Real-time processing active.';
+      case 'processingAudioChunk': return 'Transcribing audio chunk...'; // Should be less visible if isCapturing is true
       case 'summarizingNotes': return 'Updating recruiter notes...';
-      case 'error': return `An error occurred. ${errorMessage || 'Please try again.'}`;
+      case 'error': return `An error occurred. ${errorMessage || 'Please try again.'}`; // Should be handled by the first condition
       default: return 'Standby';
     }
   };
   
-  const isProcessingAnything = appStatus === 'processingAudioChunk' || appStatus === 'summarizingNotes';
+  const isProcessingAnythingNonRecording = (appStatus === 'processingAudioChunk' || appStatus === 'summarizingNotes') && !isCapturing;
+
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-start p-4 sm:p-8 bg-background">
@@ -218,7 +232,7 @@ export default function RecruitAssistPage() {
         <div className="flex flex-col sm:flex-row items-center gap-4">
           <Button
             onClick={handleRecordToggle}
-            disabled={isProcessingAnything && !isCapturing} // Disable if processing but not actively capturing (e.g. finalizing)
+            disabled={isProcessingAnythingNonRecording} 
             className="w-full sm:w-auto min-w-[200px] transition-all duration-150 ease-in-out transform hover:scale-105 text-lg py-3 px-6"
             variant={isCapturing ? "destructive" : "default"}
             size="lg"
@@ -228,8 +242,8 @@ export default function RecruitAssistPage() {
           </Button>
           <div className={`flex items-center gap-2 text-sm p-3 rounded-md w-full sm:flex-grow justify-center sm:justify-start
             ${appStatus === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-secondary text-muted-foreground'}`}>
-            {isCapturing && appStatus === 'capturingAudio' && <Mic className="h-5 w-5 text-destructive animate-pulse" />}
-            {appStatus === 'processingAudioChunk' && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
+            {isCapturing && appStatus === 'capturingAudio' && !isProcessingAudioChunkRef.current && <Mic className="h-5 w-5 text-destructive animate-pulse" />}
+            {(appStatus === 'processingAudioChunk' || (isCapturing && isProcessingAudioChunkRef.current)) && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
             {appStatus === 'summarizingNotes' && <Loader2 className="h-5 w-5 animate-spin text-accent" />}
             {appStatus === 'error' && <AlertCircle className="h-5 w-5 text-destructive" />}
             <span className="font-medium">{getStatusMessage()}</span>
