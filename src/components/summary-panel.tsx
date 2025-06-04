@@ -4,7 +4,7 @@
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, Sparkles, Loader2 } from 'lucide-react'; // Removed AlertCircle as error state is handled globally
+import { Download, Sparkles, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface SummaryPanelProps {
@@ -19,8 +19,8 @@ export function SummaryPanel({ summaryText, isLoading, isParentBusy = false }: S
   const handleExportSummary = () => {
     if (!summaryText.trim()) {
       toast({
-        title: "요약 내보내기 불가",
-        description: "내보낼 요약 내용이 없습니다.",
+        title: "Cannot Export Summary",
+        description: "There is no summary content to export.",
         variant: "destructive",
       });
       return;
@@ -34,16 +34,16 @@ export function SummaryPanel({ summaryText, isLoading, isParentBusy = false }: S
     document.body.removeChild(link);
     URL.revokeObjectURL(link.href);
     toast({
-      title: "요약 내보내기 완료",
-      description: "recruiter_notes.txt 파일이 다운로드되었습니다.",
+      title: "Summary Exported",
+      description: "The file recruiter_notes.txt has been downloaded.",
     });
   };
   
   const getStatusMessageForPanel = () => {
-    if (isLoading) return '노트 업데이트 중...';
-    if (summaryText.trim() && !isLoading) return '노트 업데이트 완료.';
-    if (isParentBusy && !isLoading && !summaryText.trim()) return '전사 내용을 기다리는 중...'; // Show only if no summary yet and parent is busy
-    return null; // Return null if no specific message needs to be shown
+    if (isLoading) return 'Updating notes...';
+    if (summaryText.trim() && !isLoading) return 'Notes updated.';
+    if (isParentBusy && !isLoading && !summaryText.trim()) return 'Waiting for transcription...';
+    return null; 
   };
 
   const statusMessage = getStatusMessageForPanel();
@@ -52,7 +52,7 @@ export function SummaryPanel({ summaryText, isLoading, isParentBusy = false }: S
     <Card className="w-full shadow-lg rounded-xl">
       <CardHeader>
         <CardTitle className="flex items-center justify-between font-headline text-2xl">
-          <span>채용 담당자 노트</span>
+          <span>Recruiter Notes</span>
           <Sparkles className="w-6 h-6 text-accent" />
         </CardTitle>
       </CardHeader>
@@ -65,7 +65,7 @@ export function SummaryPanel({ summaryText, isLoading, isParentBusy = false }: S
          )}
 
         <Textarea
-          placeholder="정리된 채용 담당자 노트가 여기에 실시간으로 표시됩니다..."
+          placeholder="Structured recruiter notes will appear here in real-time..."
           value={summaryText}
           readOnly
           className="min-h-[200px] sm:min-h-[300px] text-base bg-background border-2 border-input focus:border-primary rounded-lg p-4 shadow-inner"
@@ -79,7 +79,7 @@ export function SummaryPanel({ summaryText, isLoading, isParentBusy = false }: S
           aria-label="Export summary as TXT file"
         >
           <Download className="mr-2 h-5 w-5" />
-          요약 내보내기 (TXT)
+          Export Summary (TXT)
         </Button>
       </CardContent>
     </Card>

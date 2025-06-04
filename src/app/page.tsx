@@ -30,14 +30,14 @@ export default function RecruitAssistPage() {
 
   const audioChunkQueueRef = useRef<string[]>([]);
   const isProcessingAudioChunkRef = useRef(false);
-  const transcriptRef = useRef(''); 
+  const transcriptRef = useRef('');
   const summarizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Forward declaration for processAudioChunkQueue to resolve circular dependency if wrapped in useCallback
+  // Forward declaration
   const processAudioChunkQueueRef = useRef<() => void>(() => {});
 
   const {
-    isRecording: isCapturing, // Renamed from isRecording for clarity in this component
+    isRecording: isCapturing,
     error: recorderError,
     startRecording: startAudioCapture,
     stopRecording: stopAudioCapture
@@ -45,13 +45,12 @@ export default function RecruitAssistPage() {
     onChunkAvailable: (audioDataUri) => {
       if (appStatus === 'error') return;
       audioChunkQueueRef.current.push(audioDataUri);
-      processAudioChunkQueueRef.current(); 
+      processAudioChunkQueueRef.current();
     },
     onRecordingStop: () => {
       if (summarizeTimeoutRef.current) {
         clearTimeout(summarizeTimeoutRef.current);
       }
-      // Ensure any remaining chunks are processed before final summarization
       const checkAndFinalize = () => {
         if (audioChunkQueueRef.current.length === 0 && !isProcessingAudioChunkRef.current) {
           if (transcriptRef.current.trim() && appStatus !== 'error') {
@@ -60,8 +59,8 @@ export default function RecruitAssistPage() {
             setAppStatus('idle');
           }
         } else if (appStatus !== 'error') {
-          setAppStatus('processingAudioChunk'); // Still processing chunks
-          setTimeout(checkAndFinalize, 500); // Check again shortly
+          setAppStatus('processingAudioChunk');
+          setTimeout(checkAndFinalize, 500);
         }
       };
       checkAndFinalize();
@@ -75,15 +74,13 @@ export default function RecruitAssistPage() {
 
 
   const handleSummarizeNotes = useCallback(async (transcriptToSummarize: string, isFinal: boolean = false) => {
-    if (!transcriptToSummarize.trim() || appStatus === 'error') {
-      // If it's a final summarization attempt but no transcript, or error state, just go to idle if not capturing
+    if (!transcriptToSummarize.trim() || (appStatus === 'error' && !isFinal)) {
       if (isFinal && !isCapturing && appStatus !== 'error') {
         setAppStatus('idle');
       }
       return;
     }
-    
-    // Avoid concurrent summarizations unless it's a final one
+
     if (appStatus === 'summarizingNotes' && !isFinal) return;
 
     setAppStatus('summarizingNotes');
@@ -92,28 +89,26 @@ export default function RecruitAssistPage() {
       const result = await summarizeInterview(input);
       setCurrentNotes(result.summary);
 
-      if (appStatus !== 'error') { // Check appStatus again in case an error occurred during await
+      if (appStatus !== 'error') {
         if (isFinal) {
-          toast({ title: "처리 완료", description: "전사 및 노트 생성이 완료되었습니다."});
+          toast({ title: "Processing Complete", description: "Transcription and notes generation finished."});
           setAppStatus('idle');
-        } else if (isCapturing) { // If still capturing, go back to capturingAudio status
+        } else if (isCapturing) {
           setAppStatus('capturingAudio');
-        } else { // If not capturing and not final, implies it was an intermediate summary after recording stopped
+        } else {
           setAppStatus('idle');
         }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "요약 중 오류가 발생했습니다.";
+      const msg = err instanceof Error ? err.message : "An error occurred during summarization.";
       console.error("Summarization error:", err);
       setErrorMessage(msg);
       setAppStatus('error');
-      toast({ title: "요약 오류", description: msg, variant: "destructive" });
+      toast({ title: "Summarization Error", description: msg, variant: "destructive" });
     }
-  }, [toast, appStatus, isCapturing]); // Added isCapturing
+  }, [toast, appStatus, isCapturing]);
 
-  // Debounced summarization for real-time notes
   useEffect(() => {
-    // Only run if capturing, there's a transcript, not in error, and not already summarizing
     if (!isCapturing || !currentTranscript.trim() || appStatus === 'error' || appStatus === 'summarizingNotes') {
       if (summarizeTimeoutRef.current) {
         clearTimeout(summarizeTimeoutRef.current);
@@ -126,11 +121,10 @@ export default function RecruitAssistPage() {
     }
 
     summarizeTimeoutRef.current = setTimeout(() => {
-      // Check conditions again inside timeout, as state might have changed
       if (isCapturing && currentTranscript.trim() && appStatus !== 'error' && appStatus !== 'summarizingNotes') {
-        handleSummarizeNotes(currentTranscript, false); // Intermediate summarization
+        handleSummarizeNotes(currentTranscript, false);
       }
-    }, 7000); // Summarize 7 seconds after last transcript update during recording
+    }, 7000);
 
     return () => {
       if (summarizeTimeoutRef.current) {
@@ -139,14 +133,12 @@ export default function RecruitAssistPage() {
     };
   }, [currentTranscript, isCapturing, handleSummarizeNotes, appStatus]);
 
-
   const handleChunkTranscription = useCallback(async (audioDataUri: string) => {
     isProcessingAudioChunkRef.current = true;
-    // Set status based on whether recording is ongoing or if these are trailing chunks
     if (isCapturing) {
-      setAppStatus('capturingAudio'); // Indicates recording AND processing a chunk
+      setAppStatus('capturingAudio');
     } else {
-      setAppStatus('processingAudioChunk'); // Indicates processing chunks after recording stopped
+      setAppStatus('processingAudioChunk');
     }
 
     try {
@@ -158,23 +150,20 @@ export default function RecruitAssistPage() {
         console.warn("Transcription for chunk was empty.");
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "음성 파일 처리 중 오류가 발생했습니다.";
+      const msg = err instanceof Error ? err.message : "An error occurred while processing audio.";
       console.error("Chunk transcription error:", err);
       setErrorMessage(msg);
       setAppStatus('error');
-      toast({ title: "전사 오류", description: msg, variant: "destructive" });
+      toast({ title: "Transcription Error", description: msg, variant: "destructive" });
     } finally {
       isProcessingAudioChunkRef.current = false;
-      processAudioChunkQueueRef.current(); // Attempt to process next chunk in queue
+      processAudioChunkQueueRef.current();
       
-      // If recording has stopped and queue is empty, move to idle or trigger final summary if transcript exists
       if (!isCapturing && audioChunkQueueRef.current.length === 0) {
         if (appStatus !== 'error' && !transcriptRef.current.trim()) {
-           setAppStatus('idle'); // No transcript, go idle.
+           setAppStatus('idle');
         }
-        // Final summary is handled by onRecordingStop
       } else if (isCapturing && appStatus !== 'error' && appStatus !== 'summarizingNotes') {
-        // If still recording, and no error, and not summarizing, ensure status reflects capturing
         setAppStatus('capturingAudio');
       }
     }
@@ -194,55 +183,50 @@ export default function RecruitAssistPage() {
     processAudioChunkQueueRef.current = doProcessAudioChunkQueue;
   }, [doProcessAudioChunkQueue]);
 
-
   useEffect(() => {
     if (recorderError) {
       setAppStatus('error');
-      setErrorMessage(`녹음기 오류: ${recorderError}`);
-      toast({ title: "녹음 오류", description: recorderError, variant: "destructive" });
+      setErrorMessage(`Recorder error: ${recorderError}`);
+      toast({ title: "Recording Error", description: recorderError, variant: "destructive" });
     }
   }, [recorderError, toast]);
 
   const handleRecordToggle = async () => {
     if (isCapturing) {
-      stopAudioCapture(); 
-      // onRecordingStop will handle final summarization and status changes
+      stopAudioCapture();
     } else {
-      // Reset states for a new recording session
       setCurrentTranscript('');
       setCurrentNotes('');
       transcriptRef.current = '';
       audioChunkQueueRef.current = [];
       setErrorMessage(null);
-      setAppStatus('capturingAudio'); // Initial status when starting
+      setAppStatus('capturingAudio');
       try {
         await startAudioCapture();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "녹음 시작에 실패했습니다.";
+        const msg = err instanceof Error ? err.message : "Failed to start recording.";
         setErrorMessage(msg);
         setAppStatus('error');
-        toast({ title: "녹음 시작 오류", description: msg, variant: "destructive" });
+        toast({ title: "Recording Start Error", description: msg, variant: "destructive" });
       }
     }
   };
 
   const getStatusMessage = () => {
-    if (appStatus === 'error' && errorMessage) return `오류: ${errorMessage}`;
+    if (appStatus === 'error' && errorMessage) return `Error: ${errorMessage}`;
     switch (appStatus) {
-      case 'idle': return '녹음 대기 중.';
+      case 'idle': return 'Ready to record.';
       case 'capturingAudio':
-        return isProcessingAudioChunkRef.current ? '실시간 전사 중...' : '듣는 중...';
-      case 'processingAudioChunk': return '최종 음성 처리 중...';
-      case 'summarizingNotes': return '노트 업데이트 중...';
-      case 'error': return `오류가 발생했습니다. ${errorMessage || '다시 시도해 주세요.'}`;
-      default: return '준비 중';
+        return isProcessingAudioChunkRef.current ? 'Transcribing in real-time...' : 'Listening...';
+      case 'processingAudioChunk': return 'Processing final audio...';
+      case 'summarizingNotes': return 'Updating notes...';
+      case 'error': return `An error occurred. ${errorMessage || 'Please try again.'}`;
+      default: return 'Initializing...';
     }
   };
   
-  // Determine if any non-recording processing is happening (to disable record button)
   const isProcessingAnythingNonRecording = 
     (appStatus === 'processingAudioChunk' || appStatus === 'summarizingNotes') && !isCapturing;
-
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-start p-4 sm:p-8 bg-background">
@@ -254,7 +238,7 @@ export default function RecruitAssistPage() {
           </h1>
         </div>
         <p className="text-muted-foreground text-lg">
-          인터뷰를 녹음하고, 실시간 전사 및 즉석 채용 담당자 노트를 받아보세요.
+          Record interviews, get real-time transcriptions, and instant recruiter notes.
         </p>
       </header>
 
@@ -268,7 +252,7 @@ export default function RecruitAssistPage() {
             size="lg"
           >
             {isCapturing ? <Square className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
-            {isCapturing ? '녹음 중지' : '녹음 시작'}
+            {isCapturing ? 'Stop Recording' : 'Start Recording'}
           </Button>
           <div className={`flex items-center gap-2 text-sm p-3 rounded-md w-full sm:flex-grow justify-center sm:justify-start
             ${appStatus === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-secondary text-muted-foreground'}`}>
@@ -285,13 +269,13 @@ export default function RecruitAssistPage() {
         <Card className="shadow-lg rounded-xl">
           <CardHeader>
             <CardTitle className="flex items-center justify-between font-headline text-2xl">
-              <span>인터뷰 전사</span>
+              <span>Interview Transcription</span>
               <FileText className="w-6 h-6 text-primary" />
             </CardTitle>
           </CardHeader>
           <CardContent>
             <Textarea
-              placeholder="실시간으로 전사된 인터뷰 내용이 여기에 표시됩니다..."
+              placeholder="Live transcription of the interview will appear here..."
               value={currentTranscript}
               readOnly
               className="min-h-[300px] sm:min-h-[400px] text-base bg-background border-2 border-input focus:border-primary rounded-lg p-4 shadow-inner"
@@ -309,7 +293,7 @@ export default function RecruitAssistPage() {
 
       <footer className="w-full max-w-4xl mt-12 text-center">
         <p className="text-sm text-muted-foreground">
-          개인 정보 보호: 오디오는 전사를 위해 처리됩니다. 전사 내용은 요약에 사용됩니다. 이 애플리케이션은 오디오 파일이나 전사 내용을 영구적으로 저장하지 않습니다.
+          Privacy: Audio is processed for transcription. Transcriptions are used for summarization. This application does not permanently store audio files or transcriptions.
         </p>
       </footer>
     </div>
