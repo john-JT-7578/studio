@@ -39,31 +39,15 @@ export function SummaryPanel({ summaryText, isLoading, isParentBusy = false }: S
     });
   };
   
-  const getStatusMessageForPanel = () => {
-    if (isLoading) return 'Updating notes...';
-    if (summaryText.trim() && !isLoading) return 'Notes updated.';
-    if (isParentBusy && !isLoading && !summaryText.trim()) return 'Waiting for transcription...';
-    return null; 
-  };
-
-  const statusMessage = getStatusMessageForPanel();
-
   return (
     <Card className="w-full shadow-lg rounded-xl">
       <CardHeader>
         <CardTitle className="flex items-center justify-between font-headline text-2xl">
           <span>Recruiter Notes</span>
-          <Sparkles className="w-6 h-6 text-accent" />
+          {isLoading ? <Loader2 className="w-6 h-6 text-accent animate-spin" /> : <Sparkles className="w-6 h-6 text-accent" />}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6 p-6">
-         {statusMessage && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground p-2 bg-secondary rounded-md w-full justify-center">
-              {isLoading && <Loader2 className="h-5 w-5 animate-spin text-accent" />}
-              <span>{statusMessage}</span>
-            </div>
-         )}
-
         <Textarea
           placeholder="Structured recruiter notes will appear here in real-time..."
           value={summaryText}

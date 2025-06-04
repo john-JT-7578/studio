@@ -63,8 +63,10 @@ For each update, your task is to maintain and update a clean summary using the f
 7. Treat future transcript chunks as cumulative updates — expand or revise the summary as needed based on the ENTIRE transcript provided so far.
 
 ---
+IMPORTANT: The following section is an EXAMPLE to illustrate the desired output format and content style. Do NOT include any information from this example in your summary of the actual interview transcript provided below.
+---
 
-✍️ Example Input:
+✍️ Example Input (FOR ILLUSTRATION ONLY):
 Transcript:
 """
 19 years of total professional experience with 10 years in Marketing across CPG, Entertainment, and Consumer Electronics.
@@ -78,7 +80,7 @@ Prefers 3-week notice period. Lives in Los Angeles (Hancock Park/Koreatown), ope
 Looking for base salary $150K+ with bonus.
 """
 
-✅ Example Output (GPT should produce):
+✅ Example Output (FOR ILLUSTRATION ONLY - GPT should produce similar format for the ACTUAL transcript):
 ---
 
 **Marketing Experience:**
@@ -114,7 +116,12 @@ Looking for base salary $150K+ with bonus.
 ● Seeking base salary of $150K+ with bonus potential.
 
 ---
-Current Interview Transcript (this may be a partial segment or the complete transcript up to this point):
+END OF EXAMPLE SECTION.
+---
+
+---
+ACTUAL INTERVIEW TRANSCRIPT TO SUMMARIZE STARTS BELOW (this may be a partial segment or the complete transcript up to this point):
+---
 {{{transcript}}}
 `,
 });
