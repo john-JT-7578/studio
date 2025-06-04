@@ -69,7 +69,7 @@ For each update, your task is to maintain and update a clean summary using the f
 7. Treat future transcript chunks as cumulative updates — expand or revise the summary as needed based on the ENTIRE transcript provided so far.
 
 ---
-IMPORTANT: The following section is an EXAMPLE to illustrate the desired output format and content style. Do NOT include any information from this example in your summary of the actual interview transcript provided below.
+IMPORTANT: The following section is an EXAMPLE to illustrate the desired output format and content style. Do NOT include any information from this example in your summary of the actual interview transcript provided below. This example is for output formatting guidance only and should not be part of the generated summary.
 ---
 
 ✍️ Example Input (FOR ILLUSTRATION ONLY):
@@ -125,7 +125,7 @@ Looking for base salary $150K+ with bonus.
 END OF EXAMPLE SECTION.
 ---
 
-IMPORTANT: If the ACTUAL INTERVIEW TRANSCRIPT below is very short or contains no actionable information as per the PRELIMINARY RULE stated above, you MUST follow that rule. Otherwise, proceed to summarize according to the detailed rules.
+IMPORTANT: If the ACTUAL INTERVIEW TRANSCRIPT below is very short (e.g., less than about 10 words) or contains no actionable information as per the PRELIMINARY RULE stated above, you MUST follow that rule and output "Waiting for more meaningful content to summarize.". Otherwise, proceed to summarize according to the detailed rules, based ONLY on the ACTUAL INTERVIEW TRANSCRIPT.
 ACTUAL INTERVIEW TRANSCRIPT TO SUMMARIZE STARTS BELOW (this may be a partial segment or the complete transcript up to this point):
 ---
 {{{transcript}}}
@@ -139,9 +139,12 @@ const summarizeInterviewFlow = ai.defineFlow(
     outputSchema: SummarizeInterviewOutputSchema,
   },
   async input => {
-    // Ensure transcript is not just whitespace before sending to AI,
-    // though the prompt now also handles very short/empty inputs.
-    if (!input.transcript || !input.transcript.trim()) {
+    // Minimum character length for a transcript to be considered for summarization.
+    // This helps prevent calls to the AI with very short or empty strings that might cause errors
+    // or yield unhelpful "Waiting for..." messages from the AI itself.
+    const MIN_TRANSCRIPT_LENGTH = 30; 
+
+    if (!input.transcript || input.transcript.trim().length < MIN_TRANSCRIPT_LENGTH) {
       return { summary: "Waiting for more meaningful content to summarize." };
     }
     const {output} = await summarizeInterviewPrompt(input);
