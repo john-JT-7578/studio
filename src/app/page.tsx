@@ -97,24 +97,25 @@ export default function RecruitAssistPage() {
       const checkAndFinalize = () => {
         if (audioChunkQueueRef.current.length === 0 && !isProcessingAudioChunkRef.current) {
           if (transcriptRef.current.trim() && appStatus !== 'error') {
-            handleSummarizeNotes(transcriptRef.current, true); // Final summary call
+            // Only summarize when recording fully stops and all chunks are processed
+            handleSummarizeNotes(transcriptRef.current, true);
           } else if (appStatus !== 'error') {
             setAppStatus('idle');
           }
         } else if (appStatus !== 'error') {
-          setTimeout(checkAndFinalize, 500);
+          setTimeout(checkAndFinalize, 500); // Check again shortly
         }
       };
       if (appStatus !== 'error') {
         setAppStatus('processingAudioChunk'); // Indicate final chunks might be processing
         checkAndFinalize();
       } else {
-        if (audioChunkQueueRef.current.length === 0 && !isProcessingAudioChunkRef.current) {
-          // Error state persists
+         if (audioChunkQueueRef.current.length === 0 && !isProcessingAudioChunkRef.current) {
+          // Error state persists, do nothing more for summarization
         }
       }
     },
-    timeslice: 15000, // Process audio in 15-second chunks
+    timeslice: 10000, // Process audio in 10-second chunks
   });
 
   useEffect(() => {
@@ -139,6 +140,7 @@ export default function RecruitAssistPage() {
         toast({ title: "Process Complete", description: "Transcription and notes generated."});
         setAppStatus('idle');
       } else if (appStatus !== 'error') {
+         // This case should not be hit if isFinal is false, as summarization is only final now
          setAppStatus(isCapturing ? 'capturingAudio' : 'idle');
       }
     } catch (err) {
@@ -148,7 +150,7 @@ export default function RecruitAssistPage() {
       setAppStatus('error');
       toast({ title: "Summarization Error", description: msg, variant: "destructive" });
     }
-  }, [toast, isCapturing, appStatus]);
+  }, [toast, isCapturing, appStatus]); // appStatus dependency might need review if logic changes
 
 
   const handleRecordToggle = async () => {
