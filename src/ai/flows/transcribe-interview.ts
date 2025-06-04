@@ -22,7 +22,7 @@ const TranscribeInterviewInputSchema = z.object({
 export type TranscribeInterviewInput = z.infer<typeof TranscribeInterviewInputSchema>;
 
 const TranscribeInterviewOutputSchema = z.object({
-  transcription: z.string().describe('The transcription of the interview audio.'),
+  transcription: z.string().describe('The transcription of the interview audio, in English.'),
 });
 export type TranscribeInterviewOutput = z.infer<typeof TranscribeInterviewOutputSchema>;
 
@@ -34,7 +34,7 @@ const transcribeInterviewPrompt = ai.definePrompt({
   name: 'transcribeInterviewPrompt',
   input: {schema: TranscribeInterviewInputSchema},
   output: {schema: TranscribeInterviewOutputSchema},
-  prompt: `Transcribe this audio to text: {{media url=audioDataUri}}`,
+  prompt: `Transcribe this audio to text. The output must be in English: {{media url=audioDataUri}}`,
 });
 
 const transcribeInterviewFlow = ai.defineFlow(
