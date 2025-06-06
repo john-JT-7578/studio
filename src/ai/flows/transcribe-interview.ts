@@ -22,7 +22,7 @@ const TranscribeInterviewInputSchema = z.object({
 export type TranscribeInterviewInput = z.infer<typeof TranscribeInterviewInputSchema>;
 
 const TranscribeInterviewOutputSchema = z.object({
-  transcription: z.string().describe('The transcription of the interview audio, in English.'),
+  transcription: z.string().describe('The transcription of the interview audio, in English, with speaker labels (e.g., Interviewer:, Interviewee:, Speaker 1:).'),
 });
 export type TranscribeInterviewOutput = z.infer<typeof TranscribeInterviewOutputSchema>;
 
@@ -34,7 +34,9 @@ const transcribeInterviewPrompt = ai.definePrompt({
   name: 'transcribeInterviewPrompt',
   input: {schema: TranscribeInterviewInputSchema},
   output: {schema: TranscribeInterviewOutputSchema},
-  prompt: `Transcribe this audio to text. The output must be in English: {{media url=audioDataUri}}`,
+  prompt: `Transcribe the following audio, clearly distinguishing between the speakers. Use labels like 'Interviewer:' and 'Interviewee:' if clearly identifiable from the context of the conversation, otherwise use generic labels like 'Speaker 1:', 'Speaker 2:', etc. The output must be in English. Focus on accurately capturing what each speaker says.
+
+Audio: {{media url=audioDataUri}}`,
 });
 
 const transcribeInterviewFlow = ai.defineFlow(
